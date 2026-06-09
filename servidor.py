@@ -13,16 +13,13 @@ from __future__ import annotations
 import os
 import html
 import traceback
-from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
 import revisor
 
 PORT = int(os.environ.get("PORT", "8780"))
-LOGO = "/logo.svg"  # servido localmente (same-origin) p/ exportar imagem sem quebrar
-LOGO_FILE = Path(__file__).resolve().parent / "logo.svg"
-LOGO_SVG = LOGO_FILE.read_bytes() if LOGO_FILE.exists() else b""
+LOGO = "https://ingressodigital.com/assets/img/logo-azul.svg"
 
 STATUS_INFO = {
     "ok":         ("✅", "#1f9d55", "OK"),
@@ -98,24 +95,6 @@ a.back{color:var(--azul-d);text-decoration:none;font-size:14px;font-weight:600}
 .manual ul{margin:0;padding-left:20px;line-height:1.8;font-size:14px}
 .manual li{margin-bottom:4px}
 .foot{margin-top:34px;text-align:center;color:var(--mut);font-size:12px}
-.actions{display:flex;gap:10px;flex-wrap:wrap}
-.actions .btn{margin-top:0}
-.report{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px;
- box-shadow:0 1px 2px rgba(20,60,75,.04)}
-.rep-head{display:flex;align-items:center;gap:18px;border-bottom:1px solid var(--line);
- padding-bottom:16px;margin-bottom:6px}
-.rep-logo{height:34px}
-.report h1{font-size:21px;margin:0}
-.report .cards{margin:16px 0 6px}
-h2.sec{font-size:15px;color:var(--teal);margin:26px 0 4px;padding-top:6px}
-.sec-sub{font-size:13px;color:var(--mut);margin:0 0 10px;font-weight:600}
-@media print{
- .noprint{display:none!important}
- body{background:#fff}
- .topbar{display:none}
- .report{border:0;box-shadow:none;padding:0}
- .wrap{padding:0}
-}
 """
 
 HEADER = (f'<div class=topbar><div class=in>'
@@ -176,28 +155,6 @@ def _result_html(cadastro: str, link: str, res: dict) -> bytes:
             f'<td>{html.escape(c["site"])}{obs}</td></tr>'
         )
 
-    # Ficha de itens obrigatórios (não podem faltar no evento no ar).
-    ic_ficha = {"ok": ("✅", "var(--ok)", "OK"),
-                "faltando": ("⚠️", "var(--falt)", "FALTANDO"),
-                "info": ("ℹ️", "var(--info)", "Conferir")}
-    frows = ""
-    for f in res["ficha"]:
-        ico, cor, lbl = ic_ficha[f["status"]]
-        obs = f'<div class=obs>{html.escape(f["obs"])}</div>' if f.get("obs") else ""
-        rc = "row-falt" if f["status"] == "faltando" else ""
-        frows += (f'<tr class="{rc}"><td><span class=badge style="background:{cor}">{ico} {lbl}</span></td>'
-                  f'<td><b>{html.escape(f["item"])}</b></td>'
-                  f'<td>{html.escape(f["conteudo"])}{obs}</td></tr>')
-    n_falta = sum(1 for f in res["ficha"] if f["status"] == "faltando")
-    ficha_titulo = ("✅ Todos os itens obrigatórios estão no ar" if n_falta == 0
-                    else f'⚠️ {n_falta} item(ns) obrigatório(s) faltando no ar')
-    ficha_block = (
-        f'<h2 class=sec>Itens obrigatórios do evento</h2>'
-        f'<p class=sec-sub>{ficha_titulo}</p>'
-        f'<table><thead><tr><th>Status</th><th>Item</th><th>Conteúdo no ar</th></tr></thead>'
-        f'<tbody>{frows}</tbody></table>'
-    )
-
     # Bloco dedicado: pontos que o site não expõe e precisam de conferência manual.
     manuais = [c for c in res["checks"] if c["status"] == "info"]
     if manuais:
@@ -217,48 +174,23 @@ def _result_html(cadastro: str, link: str, res: dict) -> bytes:
     nome = html.escape(res["site"].get("nome") or "—")
     body = f"""<!doctype html><html lang=pt-br><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>Revisão · {nome}</title><style>{PAGE_CSS}</style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-</head><body>
+<title>Revisão · {nome}</title><style>{PAGE_CSS}</style></head><body>
 {HEADER}
 <div class=wrap>
-<div class="head-row noprint">
+<div class=head-row>
+  <div>
+    <h1>{nome}</h1>
+    <p class="evt-link">No ar em: <a href="{html.escape(link)}" target=_blank>{html.escape(link)}</a></p>
+  </div>
   <a class="btn btn-ghost" href="/">+ Novo evento</a>
-  <div class=actions>
-    <button class="btn btn-ghost" onclick="window.print()">🖨️ Imprimir / PDF</button>
-    <button class="btn btn-primary" id=btnimg onclick="salvarImagem()">🖼️ Salvar como imagem</button>
-  </div>
 </div>
-<div id=relatorio class=report>
-  <div class=rep-head>
-    <img src="{LOGO}" alt="Ingresso Digital" class=rep-logo>
-    <div>
-      <h1>{nome}</h1>
-      <p class="evt-link">Página de vendas: <a href="{html.escape(link)}" target=_blank>{html.escape(link)}</a></p>
-    </div>
-  </div>
-  {alerta}
-  <div class=cards>{cards}</div>
-  {ficha_block}
-  <h2 class=sec>Conferência cadastro × site</h2>
-  <table><thead><tr><th>Status</th><th>Campo</th><th>Cadastro</th><th>No ar (site)</th></tr></thead>
-  <tbody>{linhas}</tbody></table>
-  {manual_block}
-</div>
+{alerta}
+<div class=cards>{cards}</div>
+<table><thead><tr><th>Status</th><th>Campo</th><th>Cadastro</th><th>No ar (site)</th></tr></thead>
+<tbody>{linhas}</tbody></table>
+{manual_block}
 <div class=foot><a class=back href="/">+ Revisar outro evento</a></div>
-</div>
-<script>
-function salvarImagem(){{
-  var btn=document.getElementById('btnimg'); var txt=btn.textContent; btn.textContent='Gerando...';
-  var alvo=document.getElementById('relatorio');
-  html2canvas(alvo,{{backgroundColor:'#ffffff',scale:2,useCORS:true}}).then(function(canvas){{
-    var a=document.createElement('a');
-    a.download='revisao-{nome}.png'.replace(/[^a-z0-9.-]+/gi,'_');
-    a.href=canvas.toDataURL('image/png'); a.click(); btn.textContent=txt;
-  }}).catch(function(e){{alert('Não consegui gerar a imagem. Use Imprimir / PDF.');btn.textContent=txt;}});
-}}
-</script>
-</body></html>"""
+</div></body></html>"""
     return body.encode("utf-8")
 
 
@@ -283,13 +215,6 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/", "/index.html"):
             self._send(_form())
-        elif self.path == "/logo.svg":
-            self.send_response(200)
-            self.send_header("Content-Type", "image/svg+xml")
-            self.send_header("Cache-Control", "public, max-age=86400")
-            self.send_header("Content-Length", str(len(LOGO_SVG)))
-            self.end_headers()
-            self.wfile.write(LOGO_SVG)
         else:
             self._send(b"not found", 404)
 

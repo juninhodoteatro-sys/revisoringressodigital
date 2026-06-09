@@ -336,31 +336,8 @@ def scrape_evento(link: str) -> dict:
         txt = re.sub(r"\s+", " ", H.unescape(txt)).strip()
         out["release"] = txt or None
 
-    # regras de meia-entrada ("Meia entrada & promoções" = collapseTwo)
-    out["regras_meia"] = None
-    m = re.search(r'id="collapseTwo"[^>]*>(.*?)</div>', pub, re.S)
-    if m:
-        txt = re.sub(r"<[^>]+>", " ", m.group(1))
-        txt = re.sub(r"\s+", " ", H.unescape(txt)).strip()
-        out["regras_meia"] = txt or None
-
-    # imagem/arte do evento (banner og:image)
-    m = re.search(r'property="og:image"\s+content="([^"]+)"', pub)
-    img = H.unescape(m.group(1)).strip() if m else None
-    if img and "imgur.com/" in img and "i.imgur.com" not in img:
-        img = img.replace("imgur.com/", "i.imgur.com/")  # URL direta da imagem
-    out["banner"] = img
-
     # setores (da página /comprar)
     out["setores"] = _scrape_setores(comp) if comp else []
-
-    # mapa ilustrativo de setores: detectado pelos mapa_id (link "Ver mapa de setores")
-    pares = re.findall(r'mapa_id\d+"\s+value="(\d+)"|value="(\d+)"\s+name="mapa_id\d+"', comp)
-    ids = sorted({int(a or b) for a, b in pares if (a or b)})
-    ids = [i for i in ids if i > 0]
-    out["mapa_ids"] = ids
-    out["tem_mapa"] = bool(ids)
-    out["comprar_url"] = f"{base}/comprar/{eid}/{slug}"
     return out
 
 
@@ -633,69 +610,10 @@ def _setor_str(s: Setor) -> str:
 # --------------------------------------------------------------------------- #
 # Orquestração + serialização (para o servidor)
 # --------------------------------------------------------------------------- #
-def ficha_obrigatoria(cad: dict, site: dict) -> list[dict]:
-    """Itens que NÃO podem faltar no evento no ar. status: ok | faltando."""
-    itens: list[dict] = []
-
-    def add(item, conteudo, presente, obs=""):
-        itens.append({"item": item, "conteudo": conteudo or "—",
-                      "status": "ok" if presente else "faltando", "obs": obs})
-
-    add("Nome do evento", site.get("nome"), bool(site.get("nome")))
-
-    datas = site.get("datas") or []
-    add("Data", ", ".join(f'{d["dia"]:02d}/{d["mes"]:02d}/{d["ano"]}' for d in datas),
-        bool(datas))
-
-    hor = site.get("horarios") or []
-    add("Horário", ", ".join(hor), bool(hor))
-
-    add("Local", site.get("local"), bool(site.get("local")))
-    add("Endereço", site.get("endereco"), bool(site.get("endereco")))
-
-    rel = site.get("release")
-    add("Sobre o evento / release",
-        (rel[:160] + "…") if rel and len(rel) > 160 else rel, bool(rel),
-        "" if rel else "evento no ar SEM release")
-
-    rm = site.get("regras_meia")
-    add("Regras de Meia Entrada",
-        (rm[:160] + "…") if rm and len(rm) > 160 else rm, bool(rm),
-        "" if rm else "sem regras de meia-entrada publicadas")
-
-    setores = site.get("setores") or []
-    add("Setores", ", ".join(s.nome for s in setores if s.nome), bool(setores))
-
-    valores = "; ".join(f"{s.nome}: {_setor_str(s)}" for s in setores)
-    tem_valor = any(s.inteira is not None for s in setores)
-    add("Valores", valores, tem_valor)
-
-    if site.get("tem_mapa"):
-        ids = ", ".join(str(i) for i in site.get("mapa_ids", []))
-        add("Mapa ilustrativo (setores)",
-            f'Mapa configurado — ver em "Ver mapa de setores" na página de compra (id {ids})',
-            True)
-    else:
-        add("Mapa ilustrativo (setores)", "não detectado", False,
-            "evento sem mapa de setores configurado")
-
-    taxas = sorted({s.taxa_pct for s in setores if s.taxa_pct})
-    add("Taxa de Conveniência",
-        ", ".join(f"{int(t)}%" for t in taxas), bool(taxas))
-
-    # Bloqueios vêm do CADASTRO (o site não expõe) — informativo
-    bloq = cad.get("bloqueios")
-    itens.append({"item": "Bloqueios", "conteudo": bloq or "não informado no cadastro",
-                  "status": "info",
-                  "obs": "não aparece no site — confira no painel administrativo"})
-    return itens
-
-
 def revisar(texto_cadastro: str, link: str) -> dict:
     cad = parse_cadastro(texto_cadastro)
     site = scrape_evento(link)
     checks = comparar(cad, site)
-    ficha = ficha_obrigatoria(cad, site)
     resumo = {
         "ok": sum(c.status == "ok" for c in checks),
         "divergente": sum(c.status == "divergente" for c in checks),
@@ -707,7 +625,6 @@ def revisar(texto_cadastro: str, link: str) -> dict:
         "cadastro": _serial(cad),
         "site": _serial(site),
         "checks": [asdict(c) for c in checks],
-        "ficha": ficha,
         "resumo": resumo,
     }
 
